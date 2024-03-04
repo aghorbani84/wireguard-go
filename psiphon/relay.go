@@ -3,6 +3,7 @@ package psiphon
 import (
 	"encoding/hex"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"time"
@@ -27,37 +28,35 @@ func handleRequest(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if packetHex == "" {
-		fmt.Fprintln(w, "No valid hex packet found in request")
+		http.Error(w, "No valid hex packet found in request", http.StatusBadRequest)
 		return
 	}
 
 	// Assuming remote host and port are provided
-	remoteHost := "engage.cloudflareclient.com"
-	remotePort := "2408"
+	remoteAddr := net.JoinHostPort("engage.cloudflareclient.com", "2408")
 
-	response, err := sendUdpPacket(remoteHost, remotePort, packetHex)
+	response, err := sendUdpPacket(remoteAddr, packetHex)
 	if err != nil {
-		fmt.Fprintf(w, "Error: %v\n", err)
+		http.Error(w, fmt.Sprintf("Error: %v", err), http.StatusInternalServerError)
 	} else {
 		fmt.Fprintf(w, "Response: %s\n", response)
 	}
 }
 
-func sendUdpPacket(remoteHost, remotePort, packetHex string) (string, error) {
+func sendUdpPacket(remoteAddr string, packetHex string) (string, error) {
 	packet, err := hex.DecodeString(packetHex)
 	if err != nil {
-		return "", fmt.Errorf("invalid hex string: %v", err)
+		return "", fmt.Errorf("invalid hex string: %w", err)
 	}
 
-	remoteAddr := net.JoinHostPort(remoteHost, remotePort)
 	conn, err := net.Dial("udp", remoteAddr)
 	if err != nil {
-		return "", fmt.Errorf("dial error: %v", err)
+		return "", fmt.Errorf("dial error: %w", err)
 	}
 	defer conn.Close()
 
 	if _, err = conn.Write(packet); err != nil {
-		return "", fmt.Errorf("write error: %v", err)
+		return "", fmt.Errorf("write error: %w", err)
 	}
 
 	conn.SetReadDeadline(time.Now().Add(5 * time.Second))
@@ -65,7 +64,7 @@ func sendUdpPacket(remoteHost, remotePort, packetHex string) (string, error) {
 	buffer := make([]byte, 1024)
 	n, err := conn.Read(buffer)
 	if err != nil {
-		return "", fmt.Errorf("read error: %v", err)
+		return "", fmt.Errorf("read error: %w", err)
 	}
 
 	return hex.EncodeToString(buffer[:n]), nil
@@ -74,4 +73,9 @@ func sendUdpPacket(remoteHost, remotePort, packetHex string) (string, error) {
 func isHex(s string) bool {
 	_, err := hex.DecodeString(s)
 	return err == nil
+}
+
+func main() {
+	http.HandleFunc("/", handleRequest)
+	http.ListenAndServe(":8080", nil)
 }
